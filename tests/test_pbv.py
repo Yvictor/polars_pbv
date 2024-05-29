@@ -1,5 +1,5 @@
 import polars as pl
-from polars_pbv import pbv, pbv_pct
+from polars_pbv import pbv, pbv_pct, pbv_topn_vp
 
 
 def test_pbv():
@@ -86,3 +86,30 @@ def test_pbv_pct():
         ).alias("pbv_pct")
     )
     assert result.equals(expected_df)
+
+
+
+def test_pbv_top_vp():
+    price_col = [100, 101, 102, 103, 104, 105, 106]
+    volume_col = [200, 220, 250, 240, 260, 300, 280]
+    window_size = 6
+    bins = 3
+    n = 2
+
+    df = pl.DataFrame({"price": price_col, "volume": volume_col})
+    expected_df = pl.DataFrame({
+        "pbv_top_vp": [
+            None, None, None, None, None,
+            [104.17, 102.5], [105.17, 103.5]
+        ]
+    })
+
+    result_df = df.select(
+        pbv_topn_vp(
+            "price", "volume", window_size=window_size, bins=bins, n=n, center=True, round=2
+        ).alias("pbv_top_vp")
+    )
+
+    print(expected_df)
+    print(result_df)
+    assert result_df.equals(expected_df)
