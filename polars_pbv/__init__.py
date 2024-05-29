@@ -88,5 +88,33 @@ def pbv_topn_vp(
             "n": n,
             "center_label": center,
             "round": round,
+            "pct": False,
+        },
+    )
+
+def pbv_topn_v(
+    price: IntoExpr,
+    volume: IntoExpr,
+    window_size: int,
+    bins: int,
+    n: int,
+    center: bool = True,
+    round: int = -1,
+    pct: bool = False,
+) -> pl.Expr:
+    price = parse_into_expr(price)
+    volume = parse_into_expr(volume)
+    return register_plugin(
+        args=[price, volume],
+        symbol="pbv_topn_v",
+        is_elementwise=False,
+        lib=lib,
+        kwargs={
+            "window_size": window_size,
+            "bins": bins,
+            "n": n,
+            "center_label": center,
+            "round": round,
+            "pct": pct,
         },
     )

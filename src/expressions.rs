@@ -19,6 +19,7 @@ pub struct PriceByVolumeTopNKwargs {
     n: usize,
     center_label: bool,
     round: i32,
+    pct: bool,
 }
 
 // fn price_by_volume_dtype(input_fields: &[Field]) -> PolarsResult<Field> {
@@ -229,5 +230,102 @@ fn pbv_topn_vp(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResu
             // label.push(Some(price_label_s));
         }
     }
-    Ok(Series::new("pbv_topn", pbv_topn))
+    Ok(Series::new("pbv_topn_vp", pbv_topn))
+}
+
+
+fn price_by_volume_topn_volume_dtype(_input_fields: &[Field]) -> PolarsResult<Field> {
+    let field = Field::new(
+        "pbv_topn_v",
+        DataType::List(Box::new(Float64Type::get_dtype())),
+    );
+    Ok(field)
+}
+
+#[polars_expr(output_type_func=price_by_volume_topn_volume_dtype)]
+fn pbv_topn_v(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResult<Series> {
+    let price = &inputs[0].to_float()?;
+    let volume = &inputs[1].to_float()?;
+    let window_size = kwargs.window_size as usize;
+    let mut pbv_topn = vec![];
+    for i in 1..(price.len() + 1) {
+        if i < window_size {
+            pbv_topn.push(None);
+        } else {
+            let mut volume_at_price = vec![];
+            let mut price_label = vec![];
+            let start = (i - window_size) as i64;
+            let window_price = price.slice(start, window_size);
+            let window_volume = volume.slice(start, window_size);
+            let max_price: f64 = window_price.max()?.unwrap();
+            let min_price: f64 = window_price.min()?.unwrap();
+            let range = max_price - min_price;
+            let interval = range / kwargs.bins as f64;
+            for n in 0..kwargs.bins {
+                let lower_bound = min_price + n as f64 * interval;
+                let upper_bound = min_price + (n + 1) as f64 * interval;
+                let center = (lower_bound + upper_bound) / 2.0;
+                if n == kwargs.bins - 1 {
+                    let v: f64 = window_volume
+                        .filter(&window_price.gt_eq(lower_bound)?)?
+                        .sum()?;
+                    volume_at_price.push(v);
+                } else {
+                    let mask = window_price.gt_eq(lower_bound)? & window_price.lt(upper_bound)?;
+                    let v = window_volume.filter(&mask)?.sum()?;
+                    volume_at_price.push(v);
+                }
+                let label = if kwargs.center_label {
+                    center
+                } else {
+                    lower_bound
+                };
+                price_label.push(label);
+            }
+            // let price_label_s = Series::new("price", &price_label);
+            // let price_label_s_round = price_label_s.round(kwargs.round as u32)?;
+            // let price_label_s = if kwargs.round < 0 {
+            //     price_label_s.f64()?
+            // } else {
+            //     price_label_s_round.f64()?
+            // };
+            let pbv_s = Series::new("volume", &volume_at_price);
+            let total_v: f64 = pbv_s.sum()?;
+            let mut pbv_s_pct;
+            let pbv_s_f64 = if kwargs.pct {
+                pbv_s_pct = pbv_s.clone() / total_v;
+                pbv_s_pct = if kwargs.round < 0 {
+                    pbv_s_pct
+                } else {
+                    pbv_s_pct.round(kwargs.round as u32)?
+                };
+                pbv_s_pct.f64()?
+            } else {
+                pbv_s_pct = if kwargs.round < 0 {
+                    pbv_s.clone()
+                } else {
+                    pbv_s.round(kwargs.round as u32)?
+                };
+                pbv_s_pct.f64()?
+            };
+            let pbv_s_idx_sort =
+                pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
+            
+            let pbv_topn_s = pbv_s_idx_sort.slice(0, kwargs.n as usize)
+                .iter()
+                .map(|opt_idx| {
+                     match opt_idx {
+                         Some(idx) => Some(pbv_s_f64.get(idx as usize).unwrap()),
+                         None => None, // Return None for out-of-bounds indices
+                     }
+                 })
+                .collect::<Vec<Option<f64>>>();
+
+            pbv_topn.push(Some(Series::new("pbv_topn", &pbv_topn_s)));
+            // pbv.push(Some(pbv_s));
+            
+            // label.push(Some(price_label_s));
+        }
+    }
+    Ok(Series::new("pbv_topn_v", pbv_topn))
 }
