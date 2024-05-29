@@ -17,6 +17,7 @@ if parse_version(pl.__version__) < parse_version("0.20.16"):
 else:
     lib = Path(__file__).parent
 
+
 def pbv(
     price: IntoExpr,
     volume: IntoExpr,
@@ -29,11 +30,17 @@ def pbv(
     volume = parse_into_expr(volume)
     return register_plugin(
         args=[price, volume],
-        symbol="price_by_volume",
+        symbol="pbv",
         is_elementwise=False,
         lib=lib,
-        kwargs={"window_size": window_size, "bins": bins, "center_label": center, "round": round},
+        kwargs={
+            "window_size": window_size,
+            "bins": bins,
+            "center_label": center,
+            "round": round,
+        },
     )
+
 
 def pbv_pct(
     price: IntoExpr,
@@ -47,8 +54,13 @@ def pbv_pct(
     volume = parse_into_expr(volume)
     return register_plugin(
         args=[price, volume],
-        symbol="price_by_volume_pct",
+        symbol="pbv_pct",
         is_elementwise=False,
         lib=lib,
-        kwargs={"window_size": window_size, "bins": bins, "center_label": center, "round": round},
+        kwargs={
+            "window_size": window_size,
+            "bins": bins,
+            "center_label": center,
+            "round": round,
+        },
     )

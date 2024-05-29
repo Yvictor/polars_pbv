@@ -77,12 +77,12 @@ def test_pbv_pct():
         .with_columns(
             pl.col("volume").list.eval(pl.element().round(4)),
         )
-        .select(pl.struct("price", "volume").alias("pbv"))
+        .select(pl.struct("price", "volume").alias("pbv_pct"))
     )
 
     result = df.select(
         pbv_pct(
             "price", "volume", window_size=window_size, bins=bins, center=False, round=4
-        ).alias("pbv")
+        ).alias("pbv_pct")
     )
     assert result.equals(expected_df)
