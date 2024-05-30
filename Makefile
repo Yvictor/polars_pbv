@@ -21,6 +21,9 @@ pre-commit: .venv
 test: .venv
 	.venv/bin/python -m pytest tests
 
+bench: .venv
+	.venv/bin/python -m pytest tests --slow
+
 run: install
 	source .venv/bin/activate && python run.py
 

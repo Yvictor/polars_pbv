@@ -18,6 +18,29 @@ else:
     lib = Path(__file__).parent
 
 
+def pbv_not_par(
+    price: IntoExpr,
+    volume: IntoExpr,
+    window_size: int,
+    bins: int,
+    center: bool = True,
+    round: int = -1,
+) -> pl.Expr:
+    price = parse_into_expr(price)
+    volume = parse_into_expr(volume)
+    return register_plugin(
+        args=[price, volume],
+        symbol="pbv_not_par",
+        is_elementwise=False,
+        lib=lib,
+        kwargs={
+            "window_size": window_size,
+            "bins": bins,
+            "center_label": center,
+            "round": round,
+        },
+    )
+
 def pbv(
     price: IntoExpr,
     volume: IntoExpr,
@@ -40,7 +63,6 @@ def pbv(
             "round": round,
         },
     )
-
 
 def pbv_pct(
     price: IntoExpr,

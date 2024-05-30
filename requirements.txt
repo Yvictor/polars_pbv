@@ -3,3 +3,5 @@ maturin
 ruff
 pytest
 mypy
+pytest-benchmark
+pytest-skip-slow
