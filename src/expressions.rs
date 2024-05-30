@@ -98,17 +98,15 @@ fn price_by_volume(
             let pbv_s = Series::new("volume", &volume_at_price);
             let pbv_s = if pct {
                 let total_volume: f64 = pbv_s.sum()?;
-                if round < 0 {
-                    pbv_s / total_volume
-                } else {
+                if round >= 0 {
                     (pbv_s / total_volume).round(round as u32)?
-                }
-            } else {
-                if round < 0 {
-                    pbv_s
                 } else {
-                    pbv_s.round(round as u32)?
+                    pbv_s / total_volume
                 }
+            } else if round >= 0 {
+                pbv_s.round(round as u32)?
+            } else {
+                pbv_s
             };
             pbv.push(Some(pbv_s));
             let price_label_s = if round < 0 {
@@ -121,7 +119,7 @@ fn price_by_volume(
     }
     let label_series = Series::new("price", &label);
     let pbv_series = Series::new("volume", &pbv);
-    let out = StructChunked::new("pbv", &vec![label_series, pbv_series])?;
+    let out = StructChunked::new("pbv", &[label_series, pbv_series])?;
     Ok(out.into_series())
 }
 
@@ -211,28 +209,22 @@ fn pbv_topn_vp(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResu
                 price_label_s_round.f64()?
             };
             let pbv_s = Series::new("volume", &volume_at_price);
-            let pbv_s_idx_sort =
-                pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
-            
-            let pbv_topn_s = pbv_s_idx_sort.slice(0, kwargs.n as usize)
+            let pbv_s_idx_sort = pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
+
+            let pbv_topn_s = pbv_s_idx_sort
+                .slice(0, kwargs.n)
                 .iter()
-                .map(|opt_idx| {
-                     match opt_idx {
-                         Some(idx) => Some(price_label_s.get(idx as usize).unwrap()),
-                         None => None, // Return None for out-of-bounds indices
-                     }
-                 })
+                .map(|opt_idx| opt_idx.map(|idx| price_label_s.get(idx as usize).unwrap()))
                 .collect::<Vec<Option<f64>>>();
 
             pbv_topn.push(Some(Series::new("pbv_topn", &pbv_topn_s)));
             // pbv.push(Some(pbv_s));
-            
+
             // label.push(Some(price_label_s));
         }
     }
     Ok(Series::new("pbv_topn_vp", pbv_topn))
 }
-
 
 fn price_by_volume_topn_volume_dtype(_input_fields: &[Field]) -> PolarsResult<Field> {
     let field = Field::new(
@@ -308,22 +300,19 @@ fn pbv_topn_v(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResul
                 };
                 pbv_s_pct.f64()?
             };
-            let pbv_s_idx_sort =
-                pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
-            
-            let pbv_topn_s = pbv_s_idx_sort.slice(0, kwargs.n as usize)
+            let pbv_s_idx_sort = pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
+
+            let pbv_topn_s = pbv_s_idx_sort
+                .slice(0, kwargs.n)
                 .iter()
                 .map(|opt_idx| {
-                     match opt_idx {
-                         Some(idx) => Some(pbv_s_f64.get(idx as usize).unwrap()),
-                         None => None, // Return None for out-of-bounds indices
-                     }
-                 })
+                    opt_idx.map(|idx| pbv_s_f64.get(idx as usize).unwrap())
+                })
                 .collect::<Vec<Option<f64>>>();
 
             pbv_topn.push(Some(Series::new("pbv_topn", &pbv_topn_s)));
             // pbv.push(Some(pbv_s));
-            
+
             // label.push(Some(price_label_s));
         }
     }
