@@ -92,6 +92,7 @@ def pbv_topn_vp(
         },
     )
 
+
 def pbv_topn_v(
     price: IntoExpr,
     volume: IntoExpr,
