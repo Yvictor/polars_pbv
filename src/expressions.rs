@@ -135,93 +135,103 @@ fn price_by_volume_par(
 ) -> PolarsResult<Series> {
     let window_size = window_size as usize;
     let price_len = price.len();
+    let thread_count = rayon::current_num_threads();
+    let chunk_size = (price_len + thread_count - 1) / thread_count;
 
-    let pbv: Vec<Option<Series>> = (1..=price_len)
+    let pbv: Vec<Option<Series>> = (0..thread_count)
         .into_par_iter()
-        .map(|i| {
-            if i < window_size {
-                None
-            } else {
-                let start = (i - window_size) as i64;
-                let window_price = price.slice(start, window_size);
-                let window_volume = volume.slice(start, window_size);
-                let max_price: f64 = window_price.max().unwrap().unwrap();
-                let min_price: f64 = window_price.min().unwrap().unwrap();
-                let range = max_price - min_price;
-                let interval = range / bins as f64;
-
-                let volume_at_price: Vec<f64> = (0..bins)
-                    .into_par_iter()
-                    .map(|n| {
-                        let lower_bound = min_price + n as f64 * interval;
-                        let upper_bound = min_price + (n + 1) as f64 * interval;
-                        if n == bins - 1 {
-                            window_volume
-                                .filter(&window_price.gt_eq(lower_bound).unwrap())
-                                .unwrap()
-                                .sum()
-                                .unwrap()
-                        } else {
-                            let mask = window_price.gt_eq(lower_bound).unwrap()
-                                & window_price.lt(upper_bound).unwrap();
-                            window_volume.filter(&mask).unwrap().sum().unwrap()
-                        }
-                    })
-                    .collect();
-
-                let pbv_s = Series::new("volume", &volume_at_price);
-                let pbv_s = if pct {
-                    let total_volume: f64 = pbv_s.sum().unwrap();
-                    if round >= 0 {
-                        (pbv_s / total_volume).round(round as u32).unwrap()
-                    } else {
-                        pbv_s / total_volume
-                    }
-                } else if round >= 0 {
-                    pbv_s.round(round as u32).unwrap()
+        .flat_map(|thread_idx| {
+            let start_idx = thread_idx * chunk_size + 1;
+            let end_idx = ((thread_idx + 1) * chunk_size + 1).min(price_len + 1);
+            (start_idx..end_idx).map(|i| {
+                if i < window_size {
+                    None
                 } else {
-                    pbv_s
-                };
-                Some(pbv_s)
-            }
+                    let start = (i - window_size) as i64;
+                    let window_price = price.slice(start, window_size);
+                    let window_volume = volume.slice(start, window_size);
+                    let max_price: f64 = window_price.max().unwrap().unwrap();
+                    let min_price: f64 = window_price.min().unwrap().unwrap();
+                    let range = max_price - min_price;
+                    let interval = range / bins as f64;
+    
+                    let volume_at_price: Vec<f64> = (0..bins)
+                        .into_par_iter()
+                        .map(|n| {
+                            let lower_bound = min_price + n as f64 * interval;
+                            let upper_bound = min_price + (n + 1) as f64 * interval;
+                            if n == bins - 1 {
+                                window_volume
+                                    .filter(&window_price.gt_eq(lower_bound).unwrap())
+                                    .unwrap()
+                                    .sum()
+                                    .unwrap()
+                            } else {
+                                let mask = window_price.gt_eq(lower_bound).unwrap()
+                                    & window_price.lt(upper_bound).unwrap();
+                                window_volume.filter(&mask).unwrap().sum().unwrap()
+                            }
+                        })
+                        .collect();
+    
+                    let pbv_s = Series::new("volume", &volume_at_price);
+                    let pbv_s = if pct {
+                        let total_volume: f64 = pbv_s.sum().unwrap();
+                        if round >= 0 {
+                            (pbv_s / total_volume).round(round as u32).unwrap()
+                        } else {
+                            pbv_s / total_volume
+                        }
+                    } else if round >= 0 {
+                        pbv_s.round(round as u32).unwrap()
+                    } else {
+                        pbv_s
+                    };
+                    Some(pbv_s)
+                }
+            }).collect::<Vec<Option<Series>>>() 
         })
         .collect();
 
-    let label: Vec<Option<Series>> = (1..=price_len)
+    let label: Vec<Option<Series>> = (0..thread_count)
         .into_par_iter()
-        .map(|i| {
-            if i < window_size {
-                None
-            } else {
-                let start = (i - window_size) as i64;
-                let window_price = price.slice(start, window_size);
-                let max_price: f64 = window_price.max().unwrap().unwrap();
-                let min_price: f64 = window_price.min().unwrap().unwrap();
-                let range = max_price - min_price;
-                let interval = range / bins as f64;
-
-                let price_label: Vec<f64> = (0..bins)
-                    .into_par_iter()
-                    .map(|n| {
-                        let lower_bound = min_price + n as f64 * interval;
-                        let upper_bound = min_price + (n + 1) as f64 * interval;
-                        if center_label {
-                            (lower_bound + upper_bound) / 2.0
-                        } else {
-                            lower_bound
-                        }
-                    })
-                    .collect();
-
-                let price_label_s = if round < 0 {
-                    Series::new("price", &price_label)
+        .flat_map(|thread_count| {
+            let start_idx = thread_count * chunk_size + 1;
+            let end_idx = ((thread_count + 1) * chunk_size + 1).min(price_len + 1);
+            (start_idx..end_idx).map(|i| {
+                if i < window_size {
+                    None
                 } else {
-                    Series::new("price", &price_label)
-                        .round(round as u32)
-                        .unwrap()
-                };
-                Some(price_label_s)
-            }
+                    let start = (i - window_size) as i64;
+                    let window_price = price.slice(start, window_size);
+                    let max_price: f64 = window_price.max().unwrap().unwrap();
+                    let min_price: f64 = window_price.min().unwrap().unwrap();
+                    let range = max_price - min_price;
+                    let interval = range / bins as f64;
+    
+                    let price_label: Vec<f64> = (0..bins)
+                        .into_par_iter()
+                        .map(|n| {
+                            let lower_bound = min_price + n as f64 * interval;
+                            let upper_bound = min_price + (n + 1) as f64 * interval;
+                            if center_label {
+                                (lower_bound + upper_bound) / 2.0
+                            } else {
+                                lower_bound
+                            }
+                        })
+                        .collect();
+    
+                    let price_label_s = if round < 0 {
+                        Series::new("price", &price_label)
+                    } else {
+                        Series::new("price", &price_label)
+                            .round(round as u32)
+                            .unwrap()
+                    };
+                    Some(price_label_s)
+                }
+            }).collect::<Vec<Option<Series>>>()
         })
         .collect();
 
@@ -289,67 +299,73 @@ fn pbv_topn_vp(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResu
     let price = &inputs[0].to_float()?;
     let volume = &inputs[1].to_float()?;
     let window_size = kwargs.window_size as usize;
+    let thread_count = rayon::current_num_threads();
+    let chunk_size = (price.len() + thread_count - 1) / thread_count;
 
-    let pbv_topn: Vec<Option<Series>> = (1..=price.len())
+    let pbv_topn: Vec<Option<Series>> = (0..thread_count)
         .into_par_iter()
-        .map(|i| {
-            if i < window_size {
-                None
-            } else {
-                let mut volume_at_price = vec![];
-                let mut price_label = vec![];
-                let start = (i - window_size) as i64;
-                let window_price = price.slice(start, window_size);
-                let window_volume = volume.slice(start, window_size);
-                let max_price: f64 = window_price.max().unwrap().unwrap();
-                let min_price: f64 = window_price.min().unwrap().unwrap();
-                let range = max_price - min_price;
-                let interval = range / kwargs.bins as f64;
-
-                for n in 0..kwargs.bins {
-                    let lower_bound = min_price + n as f64 * interval;
-                    let upper_bound = min_price + (n + 1) as f64 * interval;
-                    let center = (lower_bound + upper_bound) / 2.0;
-                    if n == kwargs.bins - 1 {
-                        let v: f64 = window_volume
-                            .filter(&window_price.gt_eq(lower_bound).unwrap())
-                            .unwrap()
-                            .sum()
-                            .unwrap();
-                        volume_at_price.push(v);
-                    } else {
-                        let mask = window_price.gt_eq(lower_bound).unwrap()
-                            & window_price.lt(upper_bound).unwrap();
-                        let v = window_volume.filter(&mask).unwrap().sum().unwrap();
-                        volume_at_price.push(v);
-                    }
-                    let label = if kwargs.center_label {
-                        center
-                    } else {
-                        lower_bound
-                    };
-                    price_label.push(label);
-                }
-
-                let price_label_s = Series::new("price", &price_label);
-                let price_label_s_round = price_label_s.round(kwargs.round as u32).unwrap();
-                let price_label_s = if kwargs.round < 0 {
-                    price_label_s.f64().unwrap()
+        .flat_map(|thread_idx| {
+            let start_idx = thread_idx * chunk_size + 1;
+            let end_idx = ((thread_idx + 1) * chunk_size + 1).min(price.len() + 1);
+            (start_idx..end_idx).map(|i| {  
+                if i < window_size {
+                    None
                 } else {
-                    price_label_s_round.f64().unwrap()
-                };
-                let pbv_s = Series::new("volume", &volume_at_price);
-                let pbv_s_idx_sort =
-                    pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
-
-                let pbv_topn_s = pbv_s_idx_sort
-                    .slice(0, kwargs.n)
-                    .iter()
-                    .map(|opt_idx| opt_idx.map(|idx| price_label_s.get(idx as usize).unwrap()))
-                    .collect::<Vec<Option<f64>>>();
-
-                Some(Series::new("pbv_topn", &pbv_topn_s))
-            }
+                    let mut volume_at_price = vec![];
+                    let mut price_label = vec![];
+                    let start = (i - window_size) as i64;
+                    let window_price = price.slice(start, window_size);
+                    let window_volume = volume.slice(start, window_size);
+                    let max_price: f64 = window_price.max().unwrap().unwrap();
+                    let min_price: f64 = window_price.min().unwrap().unwrap();
+                    let range = max_price - min_price;
+                    let interval = range / kwargs.bins as f64;
+    
+                    for n in 0..kwargs.bins {
+                        let lower_bound = min_price + n as f64 * interval;
+                        let upper_bound = min_price + (n + 1) as f64 * interval;
+                        let center = (lower_bound + upper_bound) / 2.0;
+                        if n == kwargs.bins - 1 {
+                            let v: f64 = window_volume
+                                .filter(&window_price.gt_eq(lower_bound).unwrap())
+                                .unwrap()
+                                .sum()
+                                .unwrap();
+                            volume_at_price.push(v);
+                        } else {
+                            let mask = window_price.gt_eq(lower_bound).unwrap()
+                                & window_price.lt(upper_bound).unwrap();
+                            let v = window_volume.filter(&mask).unwrap().sum().unwrap();
+                            volume_at_price.push(v);
+                        }
+                        let label = if kwargs.center_label {
+                            center
+                        } else {
+                            lower_bound
+                        };
+                        price_label.push(label);
+                    }
+    
+                    let price_label_s = Series::new("price", &price_label);
+                    let price_label_s_round = price_label_s.round(kwargs.round as u32).unwrap();
+                    let price_label_s = if kwargs.round < 0 {
+                        price_label_s.f64().unwrap()
+                    } else {
+                        price_label_s_round.f64().unwrap()
+                    };
+                    let pbv_s = Series::new("volume", &volume_at_price);
+                    let pbv_s_idx_sort =
+                        pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
+    
+                    let pbv_topn_s = pbv_s_idx_sort
+                        .slice(0, kwargs.n)
+                        .iter()
+                        .map(|opt_idx| opt_idx.map(|idx| price_label_s.get(idx as usize).unwrap()))
+                        .collect::<Vec<Option<f64>>>();
+    
+                    Some(Series::new("pbv_topn", &pbv_topn_s))
+                }
+            }).collect::<Vec<Option<Series>>>()
         })
         .collect();
 
@@ -369,80 +385,82 @@ fn pbv_topn_v(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResul
     let price = &inputs[0].to_float()?;
     let volume = &inputs[1].to_float()?;
     let window_size = kwargs.window_size as usize;
+    let thread_count = rayon::current_num_threads();
+    let chunk_size = (price.len() + thread_count - 1) / thread_count;
 
-    let pbv_topn: Vec<Option<Series>> = (1..=price.len())
+    let pbv_topn: Vec<Option<Series>> = (0..thread_count)
         .into_par_iter()
-        .map(|i| {
-            if i < window_size {
-                None
-            } else {
-                let mut volume_at_price = vec![];
-                let mut price_label = vec![];
-                let start = (i - window_size) as i64;
-                let window_price = price.slice(start, window_size);
-                let window_volume = volume.slice(start, window_size);
-                let max_price: f64 = window_price.max().unwrap().unwrap();
-                let min_price: f64 = window_price.min().unwrap().unwrap();
-                let range = max_price - min_price;
-                let interval = range / kwargs.bins as f64;
-
-                for n in 0..kwargs.bins {
-                    let lower_bound = min_price + n as f64 * interval;
-                    let upper_bound = min_price + (n + 1) as f64 * interval;
-                    let center = (lower_bound + upper_bound) / 2.0;
-                    if n == kwargs.bins - 1 {
-                        let v: f64 = window_volume
-                            .filter(&window_price.gt_eq(lower_bound).unwrap())
-                            .unwrap()
-                            .sum()
-                            .unwrap();
-                        volume_at_price.push(v);
-                    } else {
-                        let mask = window_price.gt_eq(lower_bound).unwrap()
-                            & window_price.lt(upper_bound).unwrap();
-                        let v = window_volume.filter(&mask).unwrap().sum().unwrap();
-                        volume_at_price.push(v);
-                    }
-                    let label = if kwargs.center_label {
-                        center
-                    } else {
-                        lower_bound
-                    };
-                    price_label.push(label);
-                }
-
-                let pbv_s = Series::new("volume", &volume_at_price);
-                let total_v: f64 = pbv_s.sum().unwrap();
-                let mut pbv_s_pct;
-                let pbv_s_round;
-                let pbv_s_f64 = if kwargs.pct {
-                    pbv_s_pct = pbv_s.clone() / total_v;
-                    pbv_s_pct = if kwargs.round < 0 {
-                        pbv_s_pct
-                    } else {
-                        pbv_s_pct.round(kwargs.round as u32).unwrap()
-                    };
-                    pbv_s_pct.f64().unwrap()
+        .flat_map(|thread_idx| {
+            let start_idx = thread_idx * chunk_size + 1;
+            let end_idx = ((thread_idx + 1) * chunk_size + 1).min(price.len() + 1);
+            (start_idx..end_idx).map(|i| {
+                if i < window_size {
+                    None
                 } else {
-                    pbv_s_round = if kwargs.round < 0 {
-                        pbv_s.clone()
+                    let mut volume_at_price = vec![];
+                    let mut price_label = vec![];
+                    let start = (i - window_size) as i64;
+                    let window_price = price.slice(start, window_size);
+                    let window_volume = volume.slice(start, window_size);
+                    let max_price: f64 = window_price.max().unwrap().unwrap();
+                    let min_price: f64 = window_price.min().unwrap().unwrap();
+                    let range = max_price - min_price;
+                    let interval = range / kwargs.bins as f64;
+
+                    for n in 0..kwargs.bins {
+                        let lower_bound = min_price + n as f64 * interval;
+                        let upper_bound = min_price + (n + 1) as f64 * interval;
+                        let center = (lower_bound + upper_bound) / 2.0;
+                        if n == kwargs.bins - 1 {
+                            let v: f64 = window_volume
+                                .filter(&window_price.gt_eq(lower_bound).unwrap()).unwrap()
+                                .sum().unwrap();
+                            volume_at_price.push(v);
+                        } else {
+                            let mask = window_price.gt_eq(lower_bound).unwrap() & window_price.lt(upper_bound).unwrap();
+                            let v = window_volume.filter(&mask).unwrap().sum().unwrap();
+                            volume_at_price.push(v);
+                        }
+                        let label = if kwargs.center_label {
+                            center
+                        } else {
+                            lower_bound
+                        };
+                        price_label.push(label);
+                    }
+
+                    let pbv_s = Series::new("volume", &volume_at_price);
+                    let total_v: f64 = pbv_s.sum().unwrap();
+                    let mut pbv_s_pct;
+                    let pbv_s_round;
+                    let pbv_s_f64 = if kwargs.pct {
+                        pbv_s_pct = pbv_s.clone() / total_v;
+                        pbv_s_pct = if kwargs.round < 0 {
+                            pbv_s_pct
+                        } else {
+                            pbv_s_pct.round(kwargs.round as u32).unwrap()
+                        };
+                        pbv_s_pct.f64().unwrap()
                     } else {
-                        pbv_s.round(kwargs.round as u32).unwrap()
+                        pbv_s_round = if kwargs.round < 0 {
+                            pbv_s.clone()
+                        } else {
+                            pbv_s.round(kwargs.round as u32).unwrap()
+                        };
+                        pbv_s_round.f64().unwrap()
                     };
-                    pbv_s_round.f64().unwrap()
-                };
 
-                let pbv_s_idx_sort =
-                    pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
+                    let pbv_s_idx_sort = pbv_s.arg_sort(SortOptions::default().with_order_descending(true));
 
-                let pbv_topn_s = pbv_s_idx_sort
-                    .slice(0, kwargs.n)
-                    .iter()
-                    .map(|opt_idx| opt_idx.map(|idx| pbv_s_f64.get(idx as usize).unwrap()))
-                    .collect::<Vec<Option<f64>>>();
+                    let pbv_topn_s = pbv_s_idx_sort
+                        .slice(0, kwargs.n)
+                        .iter()
+                        .map(|opt_idx| opt_idx.map(|idx| pbv_s_f64.get(idx as usize).unwrap()))
+                        .collect::<Vec<Option<f64>>>();
 
-                Some(Series::new("pbv_topn", &pbv_topn_s))
-            }
+                    Some(Series::new("pbv_topn", &pbv_topn_s))
+                }
+            }).collect::<Vec<Option<Series>>>()
         })
         .collect();
 
