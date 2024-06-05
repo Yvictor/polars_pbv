@@ -135,7 +135,7 @@ fn price_by_volume_par(
 ) -> PolarsResult<Series> {
     let window_size = window_size as usize;
     let price_len = price.len();
-    let thread_count = rayon::current_num_threads();
+    let thread_count = rayon::current_num_threads() * 64; // for small chunk size
     let chunk_size = (price_len + thread_count - 1) / thread_count;
 
     let pbv: Vec<Option<Series>> = (0..thread_count)
@@ -299,7 +299,7 @@ fn pbv_topn_vp(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResu
     let price = &inputs[0].to_float()?;
     let volume = &inputs[1].to_float()?;
     let window_size = kwargs.window_size as usize;
-    let thread_count = rayon::current_num_threads();
+    let thread_count = rayon::current_num_threads() * 64; // for small chunk size;
     let chunk_size = (price.len() + thread_count - 1) / thread_count;
 
     let pbv_topn: Vec<Option<Series>> = (0..thread_count)
@@ -385,7 +385,7 @@ fn pbv_topn_v(inputs: &[Series], kwargs: PriceByVolumeTopNKwargs) -> PolarsResul
     let price = &inputs[0].to_float()?;
     let volume = &inputs[1].to_float()?;
     let window_size = kwargs.window_size as usize;
-    let thread_count = rayon::current_num_threads();
+    let thread_count = rayon::current_num_threads() * 64; // for small chunk size;
     let chunk_size = (price.len() + thread_count - 1) / thread_count;
 
     let pbv_topn: Vec<Option<Series>> = (0..thread_count)
